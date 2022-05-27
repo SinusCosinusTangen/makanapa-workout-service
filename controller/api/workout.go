@@ -32,20 +32,20 @@ func FetchWorkoutByTime(c *gin.Context) {
 	logger(esClient, []string{"info", "FetchWorkoutByTime", "Request: ", requestToString(&input)})
 
 	userId := input.UserID
-	targetTime := input.Time
+	targetTime := input.Time * 60
 	var workouts []models.Workout
 	var selectedId []int
 
-	_, err := services.Authentication(userId, c.GetHeader("access-token"))
+	_, err := services.Authentication(userId, c.GetHeader("Authorization"))
 
 	if err != nil {
-		logger(esClient, []string{"error", "FetchWorkoutByTime", "Failed to authenticate", requestToString(&input)})
+		logger(esClient, []string{"error", "FetchWorkoutByTime", "Failed to authenticate. Reason: ", err.Error()})
 		c.JSON(http.StatusUnauthorized, models.Response{Error: err.Error()})
 		return
 	}
 
 	for time := 0; time < targetTime; time += 0 {
-		var randomId = rand.Intn(7)
+		var randomId = rand.Intn(6)
 		randomId += 1
 
 		if contains(selectedId, randomId) {
@@ -54,7 +54,7 @@ func FetchWorkoutByTime(c *gin.Context) {
 				if iter == 50 {
 					break
 				}
-				randomId = rand.Intn(7)
+				randomId = rand.Intn(6)
 				randomId += 1
 				iter += 1
 			}
@@ -95,27 +95,35 @@ func FetchWorkoutByTime(c *gin.Context) {
 	}
 
 	logger(esClient, []string{"info", "FetchWorkoutByTime", "Response: ", resp})
-	c.JSON(http.StatusOK, resp)
+
+	responseData := models.History{
+		UserID:   userId,
+		Workouts: workouts,
+	}
+
+	jsonResponse, err = json.Marshal(responseData)
+	c.JSON(http.StatusOK, responseData)
 }
 
 func FetchWorkoutHistory(c *gin.Context) {
 	db := services.Database
 	esClient := services.ESClient
 
-	var input models.Request
-	if err := c.ShouldBindJSON(&input); err != nil {
-		logger(esClient, []string{"error", "FetchWorkoutHistory", "Failed to bind JSON", requestToString(&input)})
-		c.JSON(http.StatusBadRequest, models.Response{Error: err.Error()})
+	logger(esClient, []string{"info", "FetchWorkoutHistory", "Request: ", "Fetching workout history"})
+
+	userId, err := services.GetUser(c.GetHeader("Authorization"))
+
+	if err != nil {
+		logger(esClient, []string{"error", "FetchWorkoutByTime", "Cannot get User: ", err.Error()})
+		c.JSON(http.StatusUnauthorized, models.Response{Error: err.Error()})
 		return
 	}
 
-	logger(esClient, []string{"info", "FetchWorkoutHistory", "Request: ", requestToString(&input)})
-	userId := input.UserID
-
-	_, err := services.Authentication(userId, c.GetHeader("access-token"))
+	res, err := services.Authentication(userId, c.GetHeader("Authorization"))
+	logger(esClient, []string{"info", "FetchWorkoutHistory", "Authentication: ", string(res)})
 
 	if err != nil {
-		logger(esClient, []string{"error", "FetchWorkoutByTime", "Failed to authenticate", requestToString(&input)})
+		logger(esClient, []string{"error", "FetchWorkoutByTime", "Failed to authenticate", err.Error()})
 		c.JSON(http.StatusUnauthorized, models.Response{Error: err.Error()})
 		return
 	}
@@ -129,7 +137,7 @@ func FetchWorkoutHistory(c *gin.Context) {
 
 	var response models.Response = models.Response{Data: history}
 	logger(esClient, []string{"info", "FetchWorkoutHistory", "Response: ", responseToString(&response)})
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, history)
 }
 
 func responseToString(response *models.Response) string {
@@ -208,90 +216,4 @@ func contains(s []int, e int) bool {
 		}
 	}
 	return false
-}
-
-func SeedDB(c *gin.Context) {
-	db := services.Database
-
-	var workouts []models.Workout
-
-	var name = "Pull Up"
-	var time = 5
-	var calories = 120
-
-	workout1 := models.Workout{
-		Name:     name,
-		Time:     time,
-		Calories: calories,
-	}
-
-	db.Create(&workout1)
-	workouts = append(workouts, workout1)
-
-	name = "Squat Jump"
-	time = 5
-	calories = 120
-
-	workout2 := models.Workout{
-		Name:     name,
-		Time:     time,
-		Calories: calories,
-	}
-
-	db.Create(&workout2)
-	workouts = append(workouts, workout2)
-
-	name = "Plank Jump"
-	time = 5
-	calories = 120
-
-	workout3 := models.Workout{
-		Name:     name,
-		Time:     time,
-		Calories: calories,
-	}
-
-	db.Create(&workout3)
-	workouts = append(workouts, workout3)
-
-	name = "Plank"
-	time = 5
-	calories = 120
-
-	workout4 := models.Workout{
-		Name:     name,
-		Time:     time,
-		Calories: calories,
-	}
-
-	db.Create(&workout4)
-	workouts = append(workouts, workout4)
-
-	name = "Swimming"
-	time = 5
-	calories = 120
-
-	workout5 := models.Workout{
-		Name:     name,
-		Time:     time,
-		Calories: calories,
-	}
-
-	db.Create(&workout5)
-	workouts = append(workouts, workout5)
-
-	name = "Biking"
-	time = 5
-	calories = 120
-
-	workout6 := models.Workout{
-		Name:     name,
-		Time:     time,
-		Calories: calories,
-	}
-
-	db.Create(&workout6)
-	workouts = append(workouts, workout6)
-
-	c.JSON(http.StatusOK, models.Response{Data: workouts})
 }
