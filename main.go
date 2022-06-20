@@ -20,7 +20,7 @@ func main() {
 	}
 
 	services.InitializeDatabase()
-	// services.InitializeLogger()
+	services.InitializeLogger()
 
 	s := &http.Server{
 		Addr:           fmt.Sprintf(":%d", config.AppConfig.Port),

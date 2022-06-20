@@ -1,14 +1,18 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
+	"strconv"
+	"time"
 	"workout-webservice/models"
 	"workout-webservice/services"
 
 	"github.com/gin-gonic/gin"
+	"github.com/olivere/elastic/v7"
 )
 
 const WorkoutNotFoundMessage = "System Error (Workout Not Found)."
@@ -16,16 +20,16 @@ const HistoryNotFoundMessage = "System Error (History Not Found)."
 
 func FetchWorkoutByTime(c *gin.Context) {
 	db := services.Database
-	// esClient := services.ESClient
+	esClient := services.ESClient
 
 	var input models.Request
 	if err := c.ShouldBindJSON(&input); err != nil {
-		// logger(esClient, []string{"error", "FetchWorkoutByTime", "Failed to bind JSON", requestToString(&input)})
+		logger(esClient, []string{"error", "FetchWorkoutByTime", "Failed to bind JSON", requestToString(&input)})
 		c.JSON(http.StatusBadRequest, models.Response{Error: err.Error()})
 		return
 	}
 
-	// logger(esClient, []string{"info", "FetchWorkoutByTime", "Request: ", requestToString(&input)})
+	logger(esClient, []string{"info", "FetchWorkoutByTime", "Request: ", requestToString(&input)})
 
 	userId := input.UserID
 	targetTime := input.Time * 60
@@ -35,7 +39,7 @@ func FetchWorkoutByTime(c *gin.Context) {
 	_, err := services.Authentication(userId, c.GetHeader("Authorization"))
 
 	if err != nil {
-		// logger(esClient, []string{"error", "FetchWorkoutByTime", "Failed to authenticate. Reason: ", err.Error()})
+		logger(esClient, []string{"error", "FetchWorkoutByTime", "Failed to authenticate. Reason: ", err.Error()})
 		c.JSON(http.StatusUnauthorized, models.Response{Error: err.Error()})
 		return
 	}
@@ -60,7 +64,7 @@ func FetchWorkoutByTime(c *gin.Context) {
 
 		var workout models.Workout
 		if result := db.First(&workout, "id = ?", randomId); result.Error != nil {
-			// logger(esClient, []string{"error", "FetchWorkoutByTime", "Failed to find workout: ", strconv.Itoa(randomId)})
+			logger(esClient, []string{"error", "FetchWorkoutByTime", "Failed to find workout: ", strconv.Itoa(randomId)})
 			c.JSON(http.StatusNotFound, models.Response{Error: WorkoutNotFoundMessage})
 			return
 		}
@@ -76,7 +80,7 @@ func FetchWorkoutByTime(c *gin.Context) {
 	db.Create(&history)
 
 	var response models.Response = models.Response{Data: workouts}
-	// logger(esClient, []string{"info", "FetchWorkoutByTime", "Response: ", responseToString(&response)})
+	logger(esClient, []string{"info", "FetchWorkoutByTime", "Response: ", responseToString(&response)})
 
 	fmt.Println(&response)
 
@@ -87,128 +91,125 @@ func FetchWorkoutByTime(c *gin.Context) {
 
 	resp, err := services.SendToRabitMQ(jsonResponse)
 	if err != nil {
-		// logger(esClient, []string{"error", "FetchWorkoutByTime", "Failed to send to rabitmq", requestToString(&input)})
+		logger(esClient, []string{"error", "FetchWorkoutByTime", "Failed to send to rabitmq", requestToString(&input)})
 		c.JSON(http.StatusInternalServerError, models.Response{Error: err.Error()})
 		return
 	}
 
-	// logger(esClient, []string{"info", "FetchWorkoutByTime", "Response: ", resp})
-	fmt.Println(resp)
+	logger(esClient, []string{"info", "FetchWorkoutByTime", "Response: ", resp})
 
 	responseData := models.History{
 		UserID:   userId,
 		Workouts: workouts,
 	}
 
-	// jsonResponse, err = json.Marshal(responseData)
+	jsonResponse, err = json.Marshal(responseData)
 	c.JSON(http.StatusOK, responseData)
 }
 
 func FetchWorkoutHistory(c *gin.Context) {
 	db := services.Database
-	// esClient := services.ESClient
+	esClient := services.ESClient
 
-	// logger(esClient, []string{"info", "FetchWorkoutHistory", "Request: ", "Fetching workout history"})
+	logger(esClient, []string{"info", "FetchWorkoutHistory", "Request: ", "Fetching workout history"})
 
 	userId, err := services.GetUser(c.GetHeader("Authorization"))
 
 	if err != nil {
-		// logger(esClient, []string{"error", "FetchWorkoutByTime", "Cannot get User: ", err.Error()})
+		logger(esClient, []string{"error", "FetchWorkoutHistory", "Cannot get User: ", err.Error()})
 		c.JSON(http.StatusUnauthorized, models.Response{Error: err.Error()})
 		return
 	}
 
 	res, err := services.Authentication(userId, c.GetHeader("Authorization"))
-	// logger(esClient, []string{"info", "FetchWorkoutHistory", "Authentication: ", string(res)})
-	fmt.Println(res)
+	logger(esClient, []string{"info", "FetchWorkoutHistory", "Authentication: ", string(res)})
 
 	if err != nil {
-		// logger(esClient, []string{"error", "FetchWorkoutByTime", "Failed to authenticate", err.Error()})
+		logger(esClient, []string{"error", "FetchWorkoutHistory", "Failed to authenticate", err.Error()})
 		c.JSON(http.StatusUnauthorized, models.Response{Error: err.Error()})
 		return
 	}
 
 	var history []models.History
 	if result := db.Preload("Workouts").Find(&history, "user_id = ?", userId); result.Error != nil {
-		// logger(esClient, []string{"error", "FetchWorkoutHistory", "Failed to find history of user: ", userId})
+		logger(esClient, []string{"error", "FetchWorkoutHistory", "Failed to find history of user: ", userId})
 		c.JSON(http.StatusNotFound, models.Response{Error: HistoryNotFoundMessage})
 		return
 	}
 
 	var response models.Response = models.Response{Data: history}
-	fmt.Println(&response)
-	// logger(esClient, []string{"info", "FetchWorkoutHistory", "Response: ", responseToString(&response)})
+	logger(esClient, []string{"info", "FetchWorkoutHistory", "Response: ", responseToString(&response)})
 	c.JSON(http.StatusOK, history)
 }
 
-// func responseToString(response *models.Response) string {
-// 	dataJSON, err := json.Marshal(response)
-// 	if err != nil {
-// 		panic(err)
-// 	}
+func responseToString(response *models.Response) string {
+	dataJSON, err := json.Marshal(response)
+	if err != nil {
+		panic(err)
+	}
 
-// 	return string(dataJSON)
-// }
+	return string(dataJSON)
+}
 
-// func requestToString(request *models.Request) string {
-// 	dataJSON, err := json.Marshal(request)
-// 	if err != nil {
-// 		panic(err)
-// 	}
+func requestToString(request *models.Request) string {
+	dataJSON, err := json.Marshal(request)
+	if err != nil {
+		panic(err)
+	}
 
-// 	return string(dataJSON)
-// }
+	return string(dataJSON)
+}
 
-// func logger(esClient *elastic.Client, args []string) {
-// 	ctx := context.Background()
+func logger(esClient *elastic.Client, args []string) {
+	ctx := context.Background()
 
-// 	var level string = args[0]
-// 	var method string = args[1]
-// 	var message string = args[2]
-// 	if args[3] != "" {
-// 		message = message + " " + args[3]
-// 	}
+	var level string = args[0]
+	var method string = args[1]
+	var message string = args[2]
+	if args[3] != "" {
+		message = message + " " + args[3]
+	}
 
-// 	source := models.Source{
-// 		Timestamp: time.Now().Local(),
-// 		Level:     level,
-// 		Message:   message,
-// 		Version:   "1",
-// 		Method:    method,
-// 		Type:      "workout-webservice",
-// 	}
+	source := models.Source{
+		Timestamp: time.Now().Local(),
+		Level:     level,
+		Message:   message,
+		Version:   "1",
+		Method:    method,
+		Type:      "workout-webservice",
+	}
 
-// 	fields := models.Fields{
-// 		Timestamp: []time.Time{time.Now().Local()},
-// 	}
+	fields := models.Fields{
+		Timestamp: []time.Time{time.Now().Local()},
+	}
 
-// 	var date string = time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Local).Format("2006-01-02")
-// 	var logIndex = fmt.Sprintf("workout-service-log-%s", date)
+	var date string = time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Local).Format("2006-01-02")
+	var logIndex = fmt.Sprintf("workout-service-log-%s", date)
 
-// 	log := models.Log{
-// 		Index:   logIndex,
-// 		Type:    "_doc",
-// 		Version: 1,
-// 		Source:  source,
-// 		Fields:  fields,
-// 	}
+	log := models.Log{
+		Index:   logIndex,
+		Type:    "_doc",
+		Version: 1,
+		Source:  source,
+		Fields:  fields,
+	}
 
-// 	dataJSON, err := json.Marshal(log)
-// 	if err != nil {
-// 		panic(err)
-// 	}
+	dataJSON, err := json.Marshal(log)
+	if err != nil {
+		panic(err)
+	}
 
-// 	js := string(dataJSON)
-// 	ind, err := esClient.Index().
-// 		Index(logIndex).
-// 		BodyJson(js).
-// 		Do(ctx)
+	js := string(dataJSON)
+	ind, err := esClient.Index().
+		Index(logIndex).
+		BodyJson(js).
+		Do(ctx)
 
-// 	if err != nil {
-// 		fmt.Println(ind)
-// 		panic(err)
-// 	}
-// }
+	if err != nil {
+		fmt.Println(ind)
+		panic(err)
+	}
+}
 
 func contains(s []int, e int) bool {
 	for _, a := range s {
